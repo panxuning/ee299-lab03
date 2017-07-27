@@ -10,6 +10,9 @@ const int tilt = 9;
 const int knob = 1;
 const int button = 10;
 
+//temp variable
+int temp;
+
 
 class Car
 {
@@ -36,6 +39,7 @@ class Court
   String lane2;
   double score() {return _score;}
   long time() {return millis() - starttime;}
+  void retime();
   private:
   double _score;
   long starttime;
@@ -104,8 +108,10 @@ void loop()
   }
   
   if (connect) {
+    temp = 0;
     print_lane(lcd, String("Pairing...      "), String("                "));
     //TCP/IP style connection  
+    //there are still no timeout and recognition now
       if (Serial.available()) {
         str = Serial.readString();
         
@@ -114,7 +120,7 @@ void loop()
           connect = false;
           select_speed = true;
           is_host = false;
-        } else
+        }
         if (str == "SYN-ACK") {
           Serial.print("ACK");
           //wait for timeout
@@ -166,12 +172,12 @@ void loop()
           run = true;
           
           //empty wait time, for the away console to sync
-
           delay(200);
           //wait for the button to release
           while(digitalRead(button));
           //random wait time
           Serial.print("\a");
+          court.retime();
        }
     }
     else {
@@ -180,7 +186,10 @@ void loop()
       car.speed = 1 + (Serial.parseInt() / 1023.0);
       run = true;
       select_speed = false;
+
+      //wait for start signal
       while(!Serial.available());
+      court.retime();
     }
   }
   
@@ -222,6 +231,7 @@ void Car::print()
 Court::Court()
 {
   _score = 0;
+  pos = 0;
   starttime = millis();
   lane1 = String(65535, BIN);
   lane2 = String(65535, BIN);
@@ -257,6 +267,10 @@ void print_lane(LiquidCrystal &lcd, char str1[], char str2[])
   lcd.print(str2);
 }
 
+void Court::retime()
+{
+  ntime = millis();
+}
 //update lane
 void Court::update(Car &car)
 {
