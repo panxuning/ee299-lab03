@@ -1,10 +1,41 @@
 #include <LiquidCrystal.h>
 #include <Wire.h>
+#include "pitches.h"
 
 LiquidCrystal lcd(2, 3, 4, 5, 6, 7, 8);
 
-const String road1 = "Lorem ipsum dolor sit amet, eget a sed nunc arcu id, vel sit urna facilisis, facilisis ipsum diam sollicitudin lacus usto magna integer.s velit dictum, montes a ac nibh dictum, ac mauris pellentesque morbi tellus purus eiusmod, pulvinar neque.";
-const String road2 = "Et erat hendrerit lectus tempus sociis sed, leo pellentesque augue massa, erat etiam, et quam. Tempor felis Pede rhoncus sapien orci aenean at elit, u ante at lobortispis pellentesque, in lorem tristique in ullamcorper adipiscing corrupti";
+// notes in the melody:
+#define LENGTH 102
+int melody[] = {
+  NOTE_E5, NOTE_E5, NOTE_E5, 0, NOTE_C5, NOTE_E5, NOTE_G5, 0, NOTE_G4, 0,
+  NOTE_C5, 0, NOTE_G4, 0, NOTE_E4, 0, NOTE_A4, NOTE_B4, 0, NOTE_AS4, NOTE_A4,
+  NOTE_G4, NOTE_E5, NOTE_G5, NOTE_A5, NOTE_F5, NOTE_G5, 0, NOTE_E5, NOTE_C5, NOTE_D5, NOTE_B4, 0,
+  NOTE_C5, 0, NOTE_G4, 0, NOTE_E4, 0, NOTE_A4, NOTE_B4, 0, NOTE_AS4, NOTE_A4,
+  NOTE_G4, NOTE_E5, NOTE_G5, NOTE_A5, NOTE_F5, NOTE_G5, 0, NOTE_E5, NOTE_C5, NOTE_D5, NOTE_B4, 0,
+  0, NOTE_G5, NOTE_FS5, NOTE_F5, NOTE_DS5, NOTE_E5, 0, NOTE_GS4, NOTE_A4, NOTE_C5, 0, NOTE_A4, NOTE_C5, NOTE_D5,
+  0, NOTE_G5, NOTE_FS5, NOTE_F5, NOTE_DS5, NOTE_E5, 0, NOTE_C6, NOTE_C6, NOTE_C6, 0,
+  0, NOTE_G5, NOTE_FS5, NOTE_F5, NOTE_DS5, NOTE_E5, 0, NOTE_GS4, NOTE_A4, NOTE_C5, 0, NOTE_A4, NOTE_C5, NOTE_D5,
+  0, NOTE_DS5, 0, NOTE_D5, 0, NOTE_C5, 0
+};
+
+byte noteDurations[] = {
+  8, 4, 8, 8, 8, 4, 4, 4, 4, 4,
+  4, 8, 8, 4, 4, 8, 4, 8, 8, 8, 4,
+  6, 6, 6, 4, 8, 8, 8, 4, 8, 8, 4, 8,
+  4, 8, 8, 4, 4, 8, 4, 8, 8, 8, 4,
+  6, 6, 6, 4, 8, 8, 8, 4, 8, 8, 4, 8,
+  4, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+  4, 8, 8, 8, 4, 8, 8, 4, 8, 4, 4, 
+  4, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 
+  4, 4, 8, 4, 8, 4, 4, 
+};
+
+bool note_lane[LENGTH + 1];
+long note_time[LENGTH + 1];
+//indicate which note is playing now
+int curr_note = 0;
+//is a note playing now
+bool playing = false;
 
 const int tilt = 9;
 const int knob = 1;
@@ -39,16 +70,23 @@ class Court
   String lane2;
   double score() {return _score;}
   long time() {return millis() - starttime;}
+  bool over(const long &duetime) {return (millis() - starttime >= duetime);}
   void retime();
+  void getscore(const double &x) {_score += x;}
+  int combo;
+  int maxcombo;
   private:
   double _score;
   long starttime;
-  long ntime;
   double pos;
 };
 
 Car car(tilt);
 Court court;
+void generate_map();
+void print_lane(LiquidCrystal &lcd, String str1, String str2);
+void play();
+void paint_court(String &lane1, String &lane2);
 
 bool connect;
 bool select_mode;
@@ -61,6 +99,7 @@ void setup()
 {
   Serial.begin(9600);
   //set a shorter timeout
+  generate_map();
   Serial.setTimeout(300);
   lcd.begin(16, 2);
   connect = run = result = select_speed = false;
@@ -70,9 +109,7 @@ void setup()
 
 void loop()
 {
-  String str;
-  int length = 125;
-  
+  String str;  
   if (select_mode) {
     int temp = (analogRead(knob) / 256 ) & 1;
     if (!temp)
@@ -108,6 +145,7 @@ void loop()
   }
   
   if (connect) {
+    lcd.begin(16, 2);
     temp = 0;
     print_lane(lcd, String("Pairing...      "), String("                "));
     //TCP/IP style connection  
@@ -160,14 +198,14 @@ void loop()
        //print speed gauge
        for (int i = 1;i <= 10; ++i) {
           if (i * 102.2 < int_speed)
-            s += "-";
+            s += ">";
           else
-            s += "*";
+            s += "-";
        }
-       print_lane(lcd, s, String(1 + int_speed / 1023.0));
+       print_lane(lcd, s, String(1 + int_speed / 127.875));
        if (digitalRead(button)) {
           select_speed = false;
-          car.speed = 1 + (int_speed / 1023.0);
+          car.speed = 1 + (int_speed / 127.875);
           Serial.print(int_speed);
           run = true;
           
@@ -196,13 +234,16 @@ void loop()
   if (run)
   {
     car.read();
+    play();
     court.update(car);
     print_lane(lcd, court.lane1, court.lane2);
   }
   
   if (result)
   {
-    print_lane(lcd, String("Score:             "), String(court.score()) + String("               "));
+    lcd.begin(16, 2);
+    print_lane(lcd, String("Score: ") + String(court.score()) + String("               "), String("Max combo: ") + String(court.maxcombo));
+    result = false;
   }
 }
 
@@ -232,6 +273,7 @@ Court::Court()
 {
   _score = 0;
   pos = 0;
+  maxcombo = combo = 0;
   starttime = millis();
   lane1 = String(65535, BIN);
   lane2 = String(65535, BIN);
@@ -269,50 +311,96 @@ void print_lane(LiquidCrystal &lcd, char str1[], char str2[])
 
 void Court::retime()
 {
-  ntime = millis();
+  starttime = millis();
 }
+
 //update lane
 void Court::update(Car &car)
 {
-  //reposition
-  double old_pos = pos;
-  pos += (millis() - ntime) * car.speed / 200;
-  //see if new block reached
-  int flag = (int)pos - (int)old_pos;
-  ntime = millis();
-  //TO-DO: check collision
-  if (flag) {
+    paint_court(court.lane1, court.lane2);
     if (car.lane) {
-      if (flag && lane1.charAt(1) != ' ')
-        _score += 1;
       lane1.setCharAt(0, '>');
       lane2.setCharAt(0, '|');
     }
     else {
-      if (flag && lane2.charAt(1) != ' ')
-        _score += 1;
       lane1.setCharAt(0, '|');
       lane2.setCharAt(0, '>');
     }
-    for(int i = 1; i < 16; i++)
-    {
-      int j = (int)(pos + i) >> 3;
-      int k = (int)(pos + i) & 7;
-      lane1.setCharAt(i, bitRead(road1[j], k) ? '-' : ' ');
-      lane2.setCharAt(i, bitRead(road2[j], k) ? '-' : ' ');
+}
+
+void play() {
+    if (court.over(note_time[curr_note]) && !playing) {
+        // to calculate the note duration, take one second divided by the note type.
+        //e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc.
+        int noteDuration = 1000 / noteDurations[curr_note];
+        tone(8, melody[curr_note], noteDuration);
+
+        // to distinguish the notes, set a minimum time between them.
+        // the note's duration + 30% seems to work well:
+        playing = true;
     }
-  }
-  //force stop if endpoint reached
-  if (pos > 125)
-  {
-    run = false;
-    result = true;
-  }
+    if (court.over(note_time[curr_note + 1]) || result) {
+        //score now
+        if (!result) {
+            if (car.lane == note_lane[curr_note + 1]) {
+                court.getscore(1 + (++court.combo)/100.0);
+                if (court.combo > court.maxcombo)
+                    court.maxcombo = court.combo;
+            }
+            else
+              if (note_lane[curr_note + 1] < 2)
+                court.combo = 0;
+        }
+        // stop the tone playing:
+        curr_note++;
+        noTone(8);
+        playing = false;
+        if (curr_note == LENGTH - 1) {
+           run = false; 
+           result = true;
+        }
+    }
 }
 
-void refine(char str[])
+void generate_map()
 {
-  
+    //unconnected pin used to get randomness
+    randomSeed(analogRead(0));
+    //decide which lane the note is on
+    curr_note = 0;
+    note_time[0] = 0;
+    note_lane[0] = random(3);
+    for (int i = 1; i < LENGTH; ++i) {
+        note_time[i] = note_time[i - 1] + 1300 / noteDurations[i - 1];
+        note_lane[i] = random(random(12)) % 3;
+    }
 }
 
-
+void paint_court(String &lane1, String &lane2)
+{
+    lane1 = String("                ");
+    lane2 = String("                ");
+    int printtime = court.time();
+    int i;
+    // one character accounts for 250/speed ms.
+    for(int j = curr_note - 1; ; ++j)
+    {
+        i = (note_time[j] - court.time()) / (250/car.speed);
+        if (i >= 16)
+            break;
+        else {
+            if (note_lane[j]) {
+                if (i >= 0)
+                  lane2.setCharAt(i, 'O');
+                for (int k = 1; 0 <= i + k && i + k < 16 && note_time[j] + 1000/noteDurations[j] - court.time() > (i + k)*(250/car.speed); ++k)
+                    lane2.setCharAt(i + k, '=');
+            }
+            if (!note_lane[j]) {
+                if (i >= 0)
+                  lane1.setCharAt(i, 'O');
+                for (int k = 1; 0 <= i + k && i + k < 16 && note_time[j] + 1000/noteDurations[j] - court.time() > (i + k)*(250/car.speed); ++k)
+                    lane1.setCharAt(i + k, '=');
+            }
+        }
+    }
+}
